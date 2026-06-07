@@ -26,33 +26,37 @@ def RegisterEvent(request):
     user_name = request.data.get('UserName', '').strip()
     event_id = request.data.get('RegisteredEvent')
 
-    with transaction.atomic():
-        # Find or Create the user by name
-        user, _ = User.objects.get_or_create(Name=user_name)
-
-        try:
-            locked_event = Event.objects.select_for_update().get(pk=event_id)
-        except Event.DoesNotExist:
-            return Response({'RegisteredEvent': ['Event not found.']}, status=404)
-
-        current_registrations = Register.objects.select_for_update().filter(RegisteredEvent=locked_event).count()
-
-        if current_registrations >= locked_event.TotalSeats:
-            return Response('Sorry! Seats are full for this event', status=400)
-
-        if Register.objects.filter(
-            RegisteredUser=user,
-            RegisteredEvent=locked_event
-        ).exists():
-            return Response('User has already Registered for this Event', status=400)
-
-        Register.objects.create(
-            RegisteredUser=user,
-            RegisteredEvent=locked_event,
-            TimeStamp=timezone.now().time()
+    if not user_name:
+        return Response(
+            {'UserName': ['This field is required.']},
+            status=400
         )
 
-    return Response('Event Registration Successful', status=201)
+    try:
+        event = Event.objects.get(pk=event_id)
+    except Event.DoesNotExist:
+        return Response(
+            {'RegisteredEvent': ['Event not found.']},
+            status=404
+        )
+
+    user, _ = User.objects.get_or_create(Name=user_name)
+
+    serializer = RegisterSR(data={
+        'RegisteredUser': user.id,
+        'RegisteredEvent': event.id
+    })
+
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=400)
+
+    with transaction.atomic():
+        serializer.save()
+
+    return Response(
+        'Event Registration Successful',
+        status=201
+    )
 
 @api_view(['GET'])
 def ViewEvents(request):
