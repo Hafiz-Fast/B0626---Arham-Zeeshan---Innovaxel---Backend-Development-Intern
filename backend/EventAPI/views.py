@@ -23,50 +23,58 @@ def CreateEvent(requst):
 
 @api_view(['POST'])
 def RegisterEvent(request):
-    serializer = RegisterSR(data=request.data)
+    user_name = request.data.get('UserName', '').strip()
+    event_id = request.data.get('RegisteredEvent')
 
-    if serializer.is_valid():
-        registered_user = serializer.validated_data['RegisteredUser']
-        registered_event = serializer.validated_data['RegisteredEvent']
+    if not user_name:
+        return Response({'UserName': ['This field is required.']}, status=400)
 
-        with transaction.atomic():
-            locked_event = Event.objects.select_for_update().get(pk=registered_event.pk)
-            current_registrations = Register.objects.select_for_update().filter(RegisteredEvent=locked_event).count()
+    if not event_id:
+        return Response({'RegisteredEvent': ['This field is required.']}, status=400)
 
-            if current_registrations >= locked_event.TotalSeats:
-                return Response('Sorry! Seats are full for this event', status=400)
+    with transaction.atomic():
+        # Find or create the user by name
+        user, _ = User.objects.get_or_create(Name=user_name)
 
-            if Register.objects.filter(
-                RegisteredUser=registered_user,
-                RegisteredEvent=locked_event
-            ).exists():
-                return Response('User has already Registered for this Event', status=400)
+        try:
+            locked_event = Event.objects.select_for_update().get(pk=event_id)
+        except Event.DoesNotExist:
+            return Response({'RegisteredEvent': ['Event not found.']}, status=404)
 
-            Register.objects.create(
-                RegisteredUser=registered_user,
-                RegisteredEvent=locked_event,
-                TimeStamp=timezone.now().time()
-            )
+        current_registrations = Register.objects.select_for_update().filter(RegisteredEvent=locked_event).count()
 
-        return Response('Event Registration Successful', status=201)
+        if current_registrations >= locked_event.TotalSeats:
+            return Response('Sorry! Seats are full for this event', status=400)
 
-    return Response(serializer.errors, status=400)
+        if Register.objects.filter(
+            RegisteredUser=user,
+            RegisteredEvent=locked_event
+        ).exists():
+            return Response('User has already Registered for this Event', status=400)
+
+        Register.objects.create(
+            RegisteredUser=user,
+            RegisteredEvent=locked_event,
+            TimeStamp=timezone.now().time()
+        )
+
+    return Response('Event Registration Successful', status=201)
 
 @api_view(['GET'])
 def ViewEvents(request):
-    Events = Event.objects.annotate(                # Annotate is clean way of using Database operations through ORM
-        RegisteredSeats = Count('register_set'),    # register_set points towards Event Entries in Register Table
-        AvailableSeats = F('TotalSeats') - Count('register_set')
+    Events = Event.objects.annotate(                 # Annotate is clean way of using Database operations through ORM
+        RegisteredSeats = Count('register'),         # register points towards Event Entries in Register Table
+        AvailableSeats = F('TotalSeats') - Count('register')
     )
 
     # Filtering Upcoming Events only
     UpcomingFlag = request.GET.get('upcoming')
-    if UpcomingFlag and UpcomingFlag.lower() in ['true', '1', 'yes']:
+    if UpcomingFlag and UpcomingFlag.lower() == 'true':
         Events = Events.filter(EventDate__gt=timezone.now())           # EventDate__gt = Greater than timezone
     
     # Sorting by Date
     SortFlag = request.GET.get('sort')
-    if SortFlag and SortFlag.lower() in ['true', '1', 'yes']:
+    if SortFlag and SortFlag.lower() == 'true':
         Events = Events.order_by('EventDate')
     
     data = []
@@ -105,6 +113,16 @@ def ViewRegistrations(requset):
     if len(Registrations) == 0:
         return Response('No Active Registrations', status=404)
 
-    serializer = RegisterSR(Registrations, many=True)
+    data = []
+    for reg in Registrations:
+        data.append({
+            'id': reg.id,
+            'RegisteredUser': reg.RegisteredUser.id,
+            'UserName': reg.RegisteredUser.Name,
+            'RegisteredEvent': reg.RegisteredEvent.id,
+            'EventName': reg.RegisteredEvent.Name,
+            'EventDate': reg.RegisteredEvent.EventDate,
+            'TimeStamp': reg.TimeStamp,
+        })
 
-    return Response(serializer.data, status=200)
+    return Response(data, status=200)
