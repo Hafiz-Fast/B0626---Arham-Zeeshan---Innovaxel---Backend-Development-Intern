@@ -8,6 +8,41 @@ const emptyEventForm = {
   EventDate: '',
 };
 
+function extractErrorMessage(payload) {
+  if (!payload) return '';
+
+  if (typeof payload === 'string') {
+    return payload;
+  }
+
+  if (Array.isArray(payload)) {
+    return payload.map(extractErrorMessage).find(Boolean) || '';
+  }
+
+  if (typeof payload === 'object') {
+    for (const value of Object.values(payload)) {
+      const message = extractErrorMessage(value);
+      if (message) return message;
+    }
+  }
+
+  return '';
+}
+
+function formatLocalTime(value) {
+  if (!value) return '—';
+
+  const date = new Date(`1970-01-01T${value}Z`);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function App() {
   const [events, setEvents] = useState([]);
   const [registrations, setRegistrations] = useState([]);
@@ -16,6 +51,8 @@ function App() {
   const [success, setSuccess] = useState('');
   const [isBusy, setIsBusy] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [sortEvents, setSortEvents] = useState(true);
+  const [showUpcomingOnly, setShowUpcomingOnly] = useState(false);
 
   // For inline register modal
   const [registerModal, setRegisterModal] = useState(null); // { eventId, eventName }
@@ -30,7 +67,7 @@ function App() {
 
   useEffect(() => {
     void loadDashboard();
-  }, []);
+  }, [sortEvents, showUpcomingOnly]);
 
   // Auto-dismiss messages
   useEffect(() => {
@@ -43,8 +80,20 @@ function App() {
   async function loadDashboard() {
     setError('');
     try {
+      const eventsParams = new URLSearchParams();
+
+      if (sortEvents) {
+        eventsParams.set('sort', 'true');
+      }
+
+      if (showUpcomingOnly) {
+        eventsParams.set('upcoming', 'true');
+      }
+
+      const eventsQuery = eventsParams.toString();
+
       const [eventsResponse, registrationsResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/?sort=true`),
+        fetch(`${API_BASE_URL}/${eventsQuery ? `?${eventsQuery}` : ''}`),
         fetch(`${API_BASE_URL}/registrations/`),
       ]);
 
@@ -64,19 +113,21 @@ function App() {
     setError('');
 
     try {
+      const eventDate = new Date(eventForm.EventDate);
+
       const response = await fetch(`${API_BASE_URL}/create-event/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...eventForm,
           TotalSeats: Number(eventForm.TotalSeats),
-          EventDate: eventForm.EventDate,
+          EventDate: Number.isNaN(eventDate.getTime()) ? eventForm.EventDate : eventDate.toISOString(),
         }),
       });
 
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
-        throw new Error(payload ? JSON.stringify(payload) : 'Event creation failed');
+        throw new Error(extractErrorMessage(payload) || 'Event creation failed');
       }
 
       setEventForm(emptyEventForm);
@@ -108,7 +159,7 @@ function App() {
 
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
-        throw new Error(payload ? JSON.stringify(payload) : 'Registration failed');
+        throw new Error(extractErrorMessage(payload) || 'Registration failed');
       }
 
       setRegisterModal(null);
@@ -163,7 +214,7 @@ function App() {
         <header className="header-bar">
           <div className="header-left">
             <span className="logo">⚡</span>
-            <h1>EventPulse</h1>
+            <h1>EventAPI</h1>
           </div>
 
           <div className="header-stats">
@@ -231,6 +282,24 @@ function App() {
         <section className="card table-card">
           <div className="section-header">
             <h2>📅 Events</h2>
+            <div className="section-filters">
+              <label className="filter-check">
+                <input
+                  type="checkbox"
+                  checked={sortEvents}
+                  onChange={(e) => setSortEvents(e.target.checked)}
+                />
+                <span>Sort</span>
+              </label>
+              <label className="filter-check">
+                <input
+                  type="checkbox"
+                  checked={showUpcomingOnly}
+                  onChange={(e) => setShowUpcomingOnly(e.target.checked)}
+                />
+                <span>Upcoming</span>
+              </label>
+            </div>
           </div>
           <div className="table-wrap">
             <table>
@@ -344,7 +413,7 @@ function App() {
                         : '—'
                       }
                     </td>
-                    <td className="cell-date">{reg.TimeStamp || '—'}</td>
+                    <td className="cell-date">{formatLocalTime(reg.TimeStamp)}</td>
                     <td className="cell-actions">
                       <button
                         className="btn btn-sm btn-danger"
