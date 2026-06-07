@@ -26,14 +26,8 @@ def RegisterEvent(request):
     user_name = request.data.get('UserName', '').strip()
     event_id = request.data.get('RegisteredEvent')
 
-    if not user_name:
-        return Response({'UserName': ['This field is required.']}, status=400)
-
-    if not event_id:
-        return Response({'RegisteredEvent': ['This field is required.']}, status=400)
-
     with transaction.atomic():
-        # Find or create the user by name
+        # Find or Create the user by name
         user, _ = User.objects.get_or_create(Name=user_name)
 
         try:
